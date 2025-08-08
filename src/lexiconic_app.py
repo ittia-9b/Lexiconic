@@ -20,7 +20,7 @@ from AppKit import (
     NSApplication, NSStatusBar, NSVariableStatusItemLength, 
     NSMenu, NSMenuItem, NSAlert, NSOpenPanel, NSFileHandlingPanelOKButton,
     NSPasteboard, NSStringPboardType, NSEvent, NSEventMask,
-    NSKeyDownMask, NSAlternateKeyMask
+    NSKeyDownMask, NSKeyUpMask, NSAlternateKeyMask
 )
 
 # Import Quartz for event tapping (to block default behavior)
@@ -28,7 +28,7 @@ try:
     from Quartz import (
         CGEventTapCreate, CGEventTapEnable, CGEventGetIntegerValueField,
         CGEventField, kCGEventTapOptionDefault, kCGSessionEventTap,
-        kCGEventKeyDown, kCGEventFlagMaskAlternate, kCGHeadInsertEventTap,
+        kCGEventKeyDown, kCGEventKeyUp, kCGEventFlagMaskAlternate, kCGHeadInsertEventTap,
         CGEventMask, CGEventTapIsEnabled
     )
     from CoreFoundation import (
@@ -68,6 +68,11 @@ class LexiconicApp:
         # Hotkey monitoring
         self.hotkey_thread = None
         self.hotkey_active = True
+        
+        # Hotkey press tracking for momentary mode
+        self.MOMENTARY_THRESHOLD = 0.5  # seconds to qualify as long press
+        self.hotkey_press_time = None
+        self.momentary_candidate = False
         
         # Auto-paste functionality
         self.auto_paste_enabled = True
@@ -398,8 +403,14 @@ class LexiconicApp:
                     
                 # Get the frontmost application to avoid pasting into terminal/IDE
                 check_app_script = 'tell application "System Events" to get name of first application process whose frontmost is true'
-                result = subprocess.run(['osascript', '-e', check_app_script], 
-                                      capture_output=True, text=True, timeout=1)
+                # Allow more time and a single retry if System Events is momentarily busy
+                try:
+                    result = subprocess.run(['osascript', '-e', check_app_script], 
+                                          capture_output=True, text=True, timeout=3)
+                except subprocess.TimeoutExpired:
+                    print("Auto-paste: frontmost app check timed out, retrying once...")
+                    result = subprocess.run(['osascript', '-e', check_app_script], 
+                                          capture_output=True, text=True, timeout=3)
                 
                 if result.returncode == 0:
                     frontmost_app = result.stdout.strip()
@@ -417,7 +428,7 @@ class LexiconicApp:
                 applescript = f'tell application "System Events" to keystroke "{escaped_text}"'
                 
                 result = subprocess.run(['osascript', '-e', applescript], 
-                             capture_output=True, text=True, timeout=2)
+                             capture_output=True, text=True, timeout=5)
                 
                 if result.returncode == 0:
                     # Only update last_pasted_length on successful paste
@@ -506,7 +517,8 @@ Cleaned version:"""
             
         try:
             # Create event mask for key down events
-            event_mask = CGEventMask(1 << kCGEventKeyDown)
+            # Listen for both key down and key up
+            event_mask = CGEventMask((1 << kCGEventKeyDown) | (1 << kCGEventKeyUp))
             
             # Create event tap that can intercept and block events
             # Using kCGHeadInsertEventTap for highest priority to ensure blocking
@@ -565,13 +577,17 @@ Cleaned version:"""
     def setup_fallback_hotkeys(self):
         """Fallback hotkey setup using NSEvent monitoring (can't block default behavior)"""
         try:
-            # Add global monitor for key events
+            # Add global monitors for key down *and* key up events
             NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
                 NSKeyDownMask,
                 self.handle_global_key_event
             )
+            NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
+                NSKeyUpMask,
+                self.handle_global_key_event
+            )
             
-            print("Fallback hotkeys registered: ⌥← (toggle start/stop)")
+            print("Fallback hotkeys registered: ⌥← (toggle start/stop, long-press supported)")
             print("Note: Default Option+Left behavior CANNOT be blocked without Accessibility permissions")
                 
         except Exception as e:
@@ -588,7 +604,25 @@ Cleaned version:"""
                 
                 # Check if Option key is pressed and it's left arrow
                 if (flags & kCGEventFlagMaskAlternate) and key_code == self.KEY_LEFT_ARROW:
-                    print(f"Hotkey triggered: Toggling transcription (key_code={key_code}, flags={flags})")
+                    # Handle key down / key up with momentary detection
+                    if event_type == kCGEventKeyDown:
+                        self.hotkey_press_time = time.time()
+                        # Candidate for momentary if we are starting (not currently active)
+                        self.momentary_candidate = not self.is_realtime_active
+                        from Foundation import NSOperationQueue
+                        NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: self.toggleRealtimeTranscription_(None))
+                        print("Blocking default behavior for Option+Left Arrow (key down)")
+                        return None
+                    elif event_type == kCGEventKeyUp and self.hotkey_press_time is not None:
+                        duration = time.time() - self.hotkey_press_time
+                        if self.momentary_candidate and duration >= self.MOMENTARY_THRESHOLD and self.is_realtime_active:
+                            from Foundation import NSOperationQueue
+                            NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: self.toggleRealtimeTranscription_(None))
+                        # Reset tracking
+                        self.hotkey_press_time = None
+                        self.momentary_candidate = False
+                        print("Blocking default behavior for Option+Left Arrow (key up)")
+                        return None
                     # Call method on main thread
                     from Foundation import NSOperationQueue
                     def toggle_transcription():
@@ -606,18 +640,32 @@ Cleaned version:"""
         return event
     
     def handle_global_key_event(self, event):
-        """Fallback global key event handler (can't block default behavior)"""
+        """Fallback global key event handler with long-press support"""
         try:
-            # Get key code and modifier flags
             key_code = event.keyCode()
             modifiers = event.modifierFlags()
             
-            # Check if Option key is pressed
-            if modifiers & NSAlternateKeyMask:
-                if key_code == self.KEY_LEFT_ARROW:
-                    print("Hotkey triggered: Toggling transcription (fallback)")
-                    # Call method directly - we're already on the main thread
-                    self.toggleRealtimeTranscription_(None)
+            # Only interested in Option+Left Arrow
+            if not (modifiers & NSAlternateKeyMask) or key_code != self.KEY_LEFT_ARROW:
+                return
+            
+            event_type = event.type()  # 10 = keyDown, 11 = keyUp
+            if event_type == 10:  # keyDown
+                self.hotkey_press_time = time.time()
+                self.momentary_candidate = not self.is_realtime_active
+                print("Hotkey triggered: Toggling transcription (fallback keyDown)")
+                self.toggleRealtimeTranscription_(None)
+            elif event_type == 11:  # keyUp
+                if self.hotkey_press_time is not None:
+                    duration = time.time() - self.hotkey_press_time
+                    if self.momentary_candidate and duration >= self.MOMENTARY_THRESHOLD and self.is_realtime_active:
+                        print("Long-press detected - stopping transcription (fallback keyUp)")
+                        self.toggleRealtimeTranscription_(None)
+                # Reset tracking
+                self.hotkey_press_time = None
+                self.momentary_candidate = False
+        except Exception as e:
+            print(f"Error in fallback key handler: {e}")
                         
         except Exception as e:
             print(f"Error handling global key event: {e}")

@@ -17,7 +17,7 @@ sys.path.insert(0, str(src_dir))
 os.chdir(Path(__file__).parent)
 
 # Import and run the app
-from whisper_broke_app import main
+from lexiconic_app import main  
 
 if __name__ == "__main__":
     main()

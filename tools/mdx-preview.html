@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MDX Preview</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        line-height: 1.55;
+        padding: 24px;
+      }
+      .container {
+        max-width: 900px;
+        margin: 0 auto;
+      }
+      pre {
+        background: color-mix(in srgb, CanvasText 8%, Canvas);
+        padding: 12px;
+        border-radius: 8px;
+        overflow: auto;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+      .notice {
+        padding: 12px 14px;
+        border: 1px solid color-mix(in srgb, CanvasText 20%, Canvas);
+        border-left-width: 4px;
+        border-left-color: #4f46e5;
+        border-radius: 6px;
+        background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+        margin: 16px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div id="app">Loading MDX…</div>
+      <div class="notice">
+        Tip: Edit <code>planning.mdx</code> and refresh to see changes.
+      </div>
+    </div>
+
+    <script type="module">
+      import React from 'https://esm.sh/react@18?dev';
+      import { createRoot } from 'https://esm.sh/react-dom@18/client?dev';
+      import MDX from 'https://esm.sh/@mdx-js/runtime@3?deps=react@18,react-dom@18&dev';
+      import { MDXProvider } from 'https://esm.sh/@mdx-js/react@3?deps=react@18&dev';
+
+      const el = document.getElementById('app');
+      const root = createRoot(el);
+
+      const components = {
+        // Example: render blockquotes as callouts
+        blockquote: (props) => (
+          <div className="notice"><blockquote {...props} /></div>
+        )
+      };
+
+      async function loadMDX(path) {
+        const res = await fetch(path);
+        if (!res.ok) throw new Error(`Failed to fetch ${path}: ${res.status}`);
+        return await res.text();
+      }
+
+      async function main() {
+        try {
+          // Adjust the relative path if you move this file
+          const mdxText = await loadMDX('../planning.mdx');
+          root.render(
+            <React.StrictMode>
+              <MDXProvider components={components}>
+                <MDX>{mdxText}</MDX>
+              </MDXProvider>
+            </React.StrictMode>
+          );
+        } catch (err) {
+          root.render(
+            <pre style={{color: 'crimson'}}>{String(err)}</pre>
+          );
+        }
+      }
+
+      main();
+    </script>
+  </body>
+</html>

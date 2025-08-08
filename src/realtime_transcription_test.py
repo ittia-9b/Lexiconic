@@ -20,6 +20,8 @@ import threading
 import time
 import queue
 from typing import Optional
+import shutil
+import asyncio.subprocess
 
 try:
     from dotenv import load_dotenv
@@ -30,18 +32,23 @@ except ImportError:
 
 
 try:
-    import pyaudio
     import aiohttp
 except ImportError:
     print("Missing required packages. Install with:")
-    print("pip install pyaudio aiohttp openai")
+    print("pip install aiohttp openai")
     sys.exit(1)
+
+# Make pyaudio optional so file-streaming tests can run without it
+try:
+    import pyaudio
+except Exception:
+    pyaudio = None
 
 # Audio configuration
 SAMPLE_RATE = 24000  # OpenAI Realtime API expects 24kHz
 CHUNK_SIZE = 1024
 CHANNELS = 1
-FORMAT = pyaudio.paInt16
+FORMAT = pyaudio.paInt16 if pyaudio else None
 
 class RealtimeTranscriber:
     def __init__(self, api_key: str):
@@ -100,6 +107,8 @@ class RealtimeTranscriber:
     
     def setup_audio(self):
         """Initialize audio capture"""
+        if pyaudio is None:
+            raise RuntimeError("pyaudio not available; microphone capture disabled. Install pyaudio to use mic.")
         self.pyaudio_instance = pyaudio.PyAudio()
         
         try:
@@ -230,6 +239,53 @@ class RealtimeTranscriber:
             self.pyaudio_instance.terminate()
         
         print("🧹 Cleanup completed")
+    
+    async def stream_file(self, file_path: str, realtime_factor: float = 1.0, send_commit: bool = True):
+        """Stream an audio file to the realtime API as if it were live microphone input.
+        The file is decoded to 24kHz mono PCM16 using ffmpeg, chunked, and paced to real-time.
+        
+        Args:
+            file_path: Path to the audio file to stream (e.g., .m4a).
+            realtime_factor: 1.0 streams at real-time speed; >1.0 streams faster; <1.0 slower.
+            send_commit: If True, sends an input_audio_buffer.commit at the end to flush.
+        """
+        if shutil.which("ffmpeg") is None:
+            raise RuntimeError("ffmpeg is required to stream audio files. Install it, e.g., `brew install ffmpeg`.")
+        
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-loglevel", "error", "-i", file_path,
+                "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "1", "-ar", str(SAMPLE_RATE),
+                "pipe:1",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to start ffmpeg for {file_path}: {e}")
+        
+        bytes_per_frame = 2  # 16-bit mono
+        chunk_bytes = CHUNK_SIZE * bytes_per_frame
+        seconds_per_chunk = CHUNK_SIZE / float(SAMPLE_RATE)
+        
+        while True:
+            data = await proc.stdout.read(chunk_bytes)
+            if not data:
+                break
+            audio_event = {
+                "type": "input_audio_buffer.append",
+                "audio": base64.b64encode(data).decode("utf-8")
+            }
+            await self._send_audio_data(audio_event)
+            # Pace like real-time
+            await asyncio.sleep(max(0.0, seconds_per_chunk / max(realtime_factor, 1e-6)))
+        
+        await proc.wait()
+        
+        if send_commit:
+            try:
+                await self.websocket.send_str(json.dumps({"type": "input_audio_buffer.commit"}))
+            except Exception as e:
+                print(f"⚠️ Error sending commit event: {e}")
     
     def get_transcriptions(self):
         """Get all transcriptions collected so far"""
