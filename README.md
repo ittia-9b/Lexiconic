@@ -1,103 +1,57 @@
-# Lexiconic-pyobjc
+# Lexiconic
 
-A macOS menu bar application for real-time speech transcription with global hotkey controls.
-
-## Description
-
-Lexiconic is a menu bar application for macOS that provides real-time speech transcription with global hotkey controls. Built using PyObjC and OpenAI's Whisper API, it integrates seamlessly with the macOS interface and allows you to transcribe audio with simple keyboard shortcuts.
+Lexiconic is a macOS menu bar application that transcribes speech using OpenAI's APIs. It can capture audio from your microphone for real-time transcription or process existing audio files, all controlled from a small microphone icon in the menu bar.
 
 ## Features
 
-- Real-time speech transcription using OpenAI's Whisper API
-- Global hotkey controls (Option+Left Arrow to start/stop transcription)
-- Auto-paste functionality that types live transcription without clipboard pollution
-- LLM post-processing for transcription cleanup (capitalization, punctuation, word corrections)
-- System menu bar integration with 🎤 icon
-- Native macOS look and feel
-
-## Requirements
-
-- macOS 10.9 or later
-- Python 3.7+
-- PyObjC
-- OpenAI API key for transcription and LLM post-processing
+- **Live microphone transcription** powered by OpenAI's Realtime and Whisper models
+- **File transcription** for existing audio recordings
+- **Global hotkey (⌥←)** to start/stop or momentarily hold transcription
+- **Auto-paste** option that types results into the active app without touching the clipboard
+- **LLM cleanup** to add capitalization, punctuation and minor fixes
+- **Copy last transcription** from the menu bar
 
 ## Installation
 
-1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/Lexiconic-pyobjc.git
-cd Lexiconic-pyobjc
+git clone https://github.com/yourusername/Lexiconic.git
+cd Lexiconic
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-2. Create and activate a virtual environment:
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
+## Configuration
 
-3. Install dependencies:
-```bash
-pip install pyobjc openai python-dotenv
-```
+Create a `.env` file in the project root and add your OpenAI API key:
 
-4. Set up your OpenAI API key:
-Create a `.env` file in the project root with your OpenAI API key:
 ```bash
-OPENAI_API_KEY=your_api_key_here
+OPENAI_API_KEY=sk-yourkey
 ```
 
 ## Usage
 
-Run the application:
+Run the launcher script:
+
 ```bash
-python src/whisper_broke_app.py
+python run_lexiconic.py
 ```
 
-The application will appear in your menu bar with a 🎤 icon. Click on it to access the menu options.
+A microphone icon (🎤) will appear in the macOS menu bar. Use the menu or the ⌥← hotkey to control transcription.
 
-### Hotkeys
-- Option+Left Arrow: Toggle real-time transcription on/off
+### Accessibility permissions
 
-### Menu Options
-- 🎤 Start/Stop Real-time Transcription: Toggle transcription
-- 📋 Copy Last Transcription: Copy the last transcription to clipboard
-- 📂 Transcribe Audio File: Select an audio file to transcribe
-- ⌨️ Enable/Disable Auto-Paste: Toggle auto-paste functionality
-- 🧠 Enable/Disable LLM Cleanup: Toggle LLM post-processing
-- ℹ️ About: Show application information
-- ⚙️ Quit: Exit the application
-
-### Accessibility Permissions
-To fully block the default Option+Left Arrow behavior (preventing cursor movement), you need to grant Accessibility permissions:
-1. Open System Preferences > Security & Privacy > Privacy
-2. Select Accessibility from the left sidebar
-3. Click the lock icon and enter your password
-4. Add this application (Python or your terminal) to the list
-5. Restart the application
-
-Without these permissions, the hotkey will work but won't block the default macOS behavior.
+To fully block the default Option+Left Arrow behavior, grant Accessibility permission to Python or your terminal in **System Settings > Privacy & Security > Accessibility**, then restart the app.
 
 ## Development
 
-For development, you can modify `src/whisper_broke_app.py` to add new features or customize existing ones. The application uses PyObjC to interface with native macOS APIs.
+- `src/lexiconic_app.py` – menu bar interface and hotkey logic
+- `src/realtime_transcription_test.py` – real-time transcription engine
+- `src/whisper_transcription.py` – file-based transcription helpers
+- `run_lexiconic.py` – entry point
 
-### Project Structure
-- `src/whisper_broke_app.py`: Main application code
-- `src/audio_transcriber.py`: Audio transcription functionality
-- `run_whisper_broke.py`: Launcher script
-- `.env`: Environment variables
-
-### Dependencies
-- `pyobjc`: Python to Objective-C bridge for macOS APIs
-- `openai`: OpenAI API client for transcription and LLM processing
-- `python-dotenv`: Environment variable management
+Pull requests and suggestions are welcome.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Built with [PyObjC](https://pyobjc.readthedocs.io/)
-- macOS integration powered by Cocoa frameworks
+This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
